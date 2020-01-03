@@ -24,6 +24,7 @@ const int width[layers] = {4, 4, 4, 4, 2};   /// width of each layer
 const int inputWidth = 2;           /// width of the input layer
 const float learningRate = 0.2;     /// of the weights
 const float biasLearningRate = 0.2; /// because the biases sometimes may seem to be escalating too much at first (depending on data), just for the flexibility
+const float momentum = 0.3;         /// momentum of the gradient (how much previous gradient influences the current one)
 
 class Neuron {
     private:
@@ -112,6 +113,8 @@ class Weights {
 
         /// main[l][j][k] means that the j'th neuron from the l'th hidden layer is connected to the k'th neuron in the l-1'th layer (so it works backwards)
         vector<vector<vector<float> > > gradient; /// each weight has its gradient calculated (can be added when back-propagating)
+
+        vector<vector<vector<float> > > previous; /// gradient from the previous activation
 
         void Randomize() {  /// randomization of the weights' values and plugging them into the "weights.txt" file
             ofstream file("./weights.txt");
@@ -202,6 +205,7 @@ class Weights {
                     a[l][j].resize(width[l - 1]);
                 }
             }
+            previous = a;
             gradient = a;
             main = a;
         }
@@ -211,6 +215,7 @@ class Biases {
     public:
         vector<vector<float> > main;     /// each neuron has its bias (except for the input ones)
         vector<vector<float> > gradient; /// each bias has its gradient calculated (can be added when back-propagating)
+        vector<vector<float> > previous; /// gradient from the previous activation
 
         void Randomize() {  /// randomization of the biases' values and plugging them into the "biases.txt" file
             ofstream file("./biases.txt");
@@ -266,6 +271,7 @@ class Biases {
             for(int l = 0; l < layers; l++) {
                 a[l].resize(width[l]);
             }
+            previous = a;
             gradient = a;
             main = a;
         }
@@ -352,15 +358,34 @@ class Network {
                 }
             }
         }
-        void ClearAll() {                       /// clear everything
+        void CalculateMomentum() {              /// calculate momentum based on current gradient
+            for(int j = 0; j < width[0]; j++) {
+                biases.previous[0][j] = biases.gradient[0][j] * momentum;
+                for(int k = 0; k < inputWidth; k++) {
+                    weights.previous[0][j][k] = weights.gradient[0][j][k] * momentum;
+                }
+            }
+            for(int l = 1; l < layers; l++) {
+                for(int j = 0; j < width[l]; j++) {
+                    biases.previous[l][j] = biases.gradient[l][j] * momentum;
+                    for(int k = 0; k < width[l - 1]; k++) {
+                        weights.previous[l][j][k] = weights.gradient[l][j][k] * momentum;
+                    }
+                }
+            }
+        }
+        void Clear() {                          /// clear everything but momentum
+            /// clear neurons
+            ClearNeurons();
+            /// clear cost values
             for(int j = 0; j < width[layers - 1]; j++) {
                 desiredOutput[j] = 0;
             }
             for(int j = 0; j < width[layers - 1]; j++) {
                 cost[j] = 0;
             }
+            /// clear gradient and momentum
             for(int j = 0; j < width[0]; j++) {
-                neurons.main[0][j].Clear(); /// including the gradient
                 biases.gradient[0][j] = 0;
                 for(int k = 0; k < inputWidth; k++) {
                     weights.gradient[0][j][k] = 0;
@@ -368,7 +393,6 @@ class Network {
             }
             for(int l = 1; l < layers; l++) {
                 for(int j = 0; j < width[l]; j++) {
-                    neurons.main[l][j].Clear();
                     biases.gradient[l][j] = 0;
                     for(int k = 0; k < width[l - 1]; k++) {
                         weights.gradient[l][j][k] = 0;
@@ -376,6 +400,24 @@ class Network {
                 }
             }
         }
+        void ClearAll() {                       /// clear everything
+            Clear();
+            for(int j = 0; j < width[0]; j++) {
+                biases.previous[0][j] = 0;
+                for(int k = 0; k < inputWidth; k++) {
+                    weights.previous[0][j][k] = 0;
+                }
+            }
+            for(int l = 1; l < layers; l++) {
+                for(int j = 0; j < width[l]; j++) {
+                    biases.previous[l][j] = 0;
+                    for(int k = 0; k < width[l - 1]; k++) {
+                        weights.previous[l][j][k] = 0;
+                    }
+                }
+            }
+        }
+
         void CalculateCost() {                  /// the cost is negative when the output is too large and positive when too small
             for(int i = 0; i < width[layers - 1]; i++) {
                 cost[i] += desiredOutput[i] - neurons.main[layers - 1][i].output;
@@ -397,9 +439,9 @@ class Network {
             for(int l = layers - 1; l > 0; l--) { /// calculate gradient for the middle layers
 
                 for(int j = 0; j < width[l]; j++) {
-                        ///the derivative of the cost with respect to the neuron[j]
+                        /// the derivative of the cost with respect to the neuron[j]
                     float a = neurons.main[l][j].costDerivative * neurons.main[l][j].activationDerivative;
-                    biases.gradient[l][j] += a; /// cost derivative * the previous neuron (in case of biases it's always one)
+                    biases.gradient[l][j] += a;  /// cost derivative * the previous neuron (in case of biases it's always one)
 
                     for(int k = 0; k < width[l - 1]; k++) {
                             /// the derivative of the cost[j] with respect to the weight linking the k'th neuron
@@ -411,29 +453,37 @@ class Network {
             }
 
             for(int j = 0; j < width[0]; j++) { /// calculate gradient for the last layer (because it needs the input values it's not among the middle ones)
-                    ///the derivative of the cost with respect to the neuron[j]
+                    /// the derivative of the cost with respect to the neuron[j]
                 float a = neurons.main[0][j].costDerivative * neurons.main[0][j].activationDerivative;
                 biases.gradient[0][j] += a; /// cost derivative * the previous neuron (in case of biases it's always one)
 
                 for(int k = 0; k < inputWidth; k++) {
                         /// the derivative of the cost[j] with respect to the weight linking the k'th neuron
-                    weights.gradient[0][j][k] += a * neurons.input[k]; /// the last's neuron derivative * the previous neuron (in this case the input one)
+                    weights.gradient[0][j][k] += a * neurons.input[k];   /// the last's neuron derivative * the previous neuron (in this case the input one)
                 }
             }
         }
-        void BackPropagate() {                  /// update weights and biases based on their gradients and learningRate
+        void BackPropagate() {                  /// update weights and biases based on their gradients, gradient momentum and learningRate
+
+            /// to each gradient we add 'previous' term to add momentum of the gradient from the previous example
             for(int j = 0; j < width[0]; j++) { /// update weights and biases from the first non-input layer
-                biases.main[0][j] += biases.gradient[0][j] * biasLearningRate;
+                float biasDelta = biases.gradient[0][j] + biases.previous[0][j];
+                biases.main[0][j] += biasDelta * biasLearningRate;
+
                 for(int k = 0; k < inputWidth; k++) {
-                    weights.main[0][j][k] += weights.gradient[0][j][k] * learningRate;
+                    float weightDelta = weights.gradient[0][j][k] + weights.previous[0][j][k];
+                    weights.main[0][j][k] += weightDelta * learningRate;
                 }
             }
 
             for(int l = 1; l < layers; l++) { /// update the remaining weights and biases
                 for(int j = 0; j < width[l]; j++) {
-                    biases.main[l][j] += biases.gradient[l][j] * biasLearningRate;
+                    float biasDelta = biases.gradient[l][j] + biases.previous[l][j];
+                    biases.main[l][j] += biasDelta * biasLearningRate;
+
                     for(int k = 0; k < width[l - 1]; k++) {
-                        weights.main[l][j][k] += weights.gradient[l][j][k] * learningRate;
+                        float weightDelta = weights.gradient[l][j][k] + weights.previous[l][j][k];
+                        weights.main[l][j][k] += weightDelta * learningRate;
                     }
                 }
             }
@@ -451,6 +501,7 @@ class Network {
                 TrainOnExample();
             }
             BackPropagate();
+            CalculateMomentum();
         }
 
     public:
@@ -466,10 +517,10 @@ class Network {
             data.CollectBatchFromExample(0);
             for(int i = 0; i < batchIterations; i++) {          /// if we do not want to debug (and not to check if we want every time in a for)
                 TrainOnBatch();
-                ClearAll();
+                Clear();
             }
-
         }
+
         void ShowResults() {
             TrainOnBatch();
             DebugCost();
