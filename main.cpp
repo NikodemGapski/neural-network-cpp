@@ -6,25 +6,29 @@
 #include <vector>
 #include <iomanip>
 
-/// on-going tasks:
-/// find out why the network does not work on more than 3 hidden layers
+/// Things to remember:
+/// * normalize training data, so that the activation function can easily distinct different inputs (the network works best with 0-1 or +/- for classification)
 
+/// * after having the network trained once, if you want to do it the second time, randomize it (otherwise it will still think the same way as before)
+///     unless you know your second data is connected to the first (that's called a pre-training (on set A) and then fine-tuning (in set B))
 
-/// things to remember:
-/// normalize training data, so that the activation function can easily distinct different inputs !!!(the network works with 0-1 or +/-)
-/// after having the network trained once, if you want to do it the second time, randomize it (because if not done, it will still think the same way as before)
+/// * most tasks don't require more than 2-3 hidden layers, don't try to overfit the network by adding too many of them,
+///     because that may produce in a diminishing gradient throughout the layers
+
+/// * basically trust the algorithm, small network can do way more than you think (really),
+///     the core issue in deep learning is not a network's size, but amount of data it needs to perform a task
 
 using namespace std;
 
 /// width of a layer = number of neurons in a layer
 
 const float e = 2.71828;
-const int layers = 5;               /// number of layers except for the input one
-const int width[layers] = {4, 4, 4, 4, 2};   /// width of each layer
+const int layers = 3;               /// number of layers except for the input one
+const int width[layers] = {4, 4, 2};   /// width of each layer
 const int inputWidth = 2;           /// width of the input layer
 const float learningRate = 0.2;     /// of the weights
 const float biasLearningRate = 0.2; /// because the biases sometimes may seem to be escalating too much at first (depending on data), just for the flexibility
-const float momentum = 0.3;         /// momentum of the gradient (how much previous gradient influences the current one)
+const float momentum = 0.8;         /// momentum of the gradient (how much previous gradient influences the current one)
 
 class Neuron {
     private:
@@ -72,11 +76,8 @@ class Neuron {
         }
 
         Neuron(int activation = 1) { /// type of an activation function (1 - sigmoid, 2 - swish), sigmoid is default
-            activationDerivative = 0;
             activationFunction = activation;
-            input = 0;
-            output = 0;
-            costDerivative = 0;
+            Clear();
         }
 };
 
@@ -86,13 +87,18 @@ class Neurons {
         vector<vector<Neuron> > main;   /// all of the hidden neurons + output neurons
 
         Neurons(int activationFunction = 1, int outputActivationFunction = 1) { /// constructor (just creates empty arrays with activation function)
+            /// input
             vector<float> a(inputWidth);
             input = a;
+            /// hidden neuron
             Neuron n(activationFunction);
-            Neuron s(outputActivationFunction);                            /// the output is said to be sigmoid
+            /// output neuron
+            Neuron s(outputActivationFunction);
+            /// network basis
             vector<Neuron> b;
             vector<vector<Neuron> > c;
-            for(int l = 0; l < layers - 1; l++) {   /// assign activation functions to individual neurons
+            /// assigning neurons individually with their own activation functions
+            for(int l = 0; l < layers - 1; l++) {
                 c.push_back(b);
                 for(int i = 0; i < width[l]; i++) {
                     c[l].push_back(n);
@@ -102,6 +108,7 @@ class Neurons {
             for(int i = 0; i < width[layers - 1]; i++) {
                 c[layers - 1].push_back(s);
             }
+            /// assigning network basis
             main = c;
         }
 };
@@ -193,6 +200,7 @@ class Weights {
         }
 
         Weights() { ///constructor (just creates empty arrays with the given widths)
+            /// basis and resizing
             vector<vector<vector<float> > > a;
             a.resize(layers);
             a[0].resize(width[0]);
@@ -205,6 +213,7 @@ class Weights {
                     a[l][j].resize(width[l - 1]);
                 }
             }
+            /// assigning
             previous = a;
             gradient = a;
             main = a;
@@ -266,11 +275,13 @@ class Biases {
         }
 
         Biases() { /// constructor (just creates empty arrays with given widths)
+            /// basis and resizing
             vector<vector<float> > a;
             a.resize(layers);
             for(int l = 0; l < layers; l++) {
                 a[l].resize(width[l]);
             }
+            /// assigning
             previous = a;
             gradient = a;
             main = a;
@@ -308,11 +319,15 @@ class BatchData {
             }
             trainingData.close();
         }
+
         BatchData(int batchS = 0, int inSize = 0, int outputWidth = 0, string path = "") {
+            /// directory
             directory = path;
+            /// size values
             batchSize = batchS;
             inputSize = inSize;
             outputSize = outputWidth;
+            /// resizing
             desiredOutput.resize(batchSize);
             input.resize(batchSize);
             for(int i = 0; i < batchSize; i++) {
@@ -322,12 +337,50 @@ class BatchData {
         }
 };
 
+class Performance {
+    public:
+        float averageDeviation;                         /// the average absolute cost for an example
+        float averageGuess;                             /// the average guess for an example
+        float batch;                                    /// the network's performance (average of deviations for a batch)
+        float batchGuess;                               /// the network's average guess rate (for a batch)
+
+        void CalculateDeviation(vector<float> cost) {   /// calculates average deviation and adds it to the batch performance
+            averageDeviation = 0;
+            averageGuess = 0;
+            for(int i = 0; i < width[layers - 1]; i++) {
+                averageDeviation += abs(cost[i]);
+                if(abs(cost[i]) < 0.5) {
+                    averageGuess += 1;
+                }
+            }
+            averageDeviation /= width[layers - 1];
+            averageGuess /= width[layers - 1];
+            batch += averageDeviation;
+            batchGuess += averageGuess;
+        }
+        void CalculateBatch(int batchSize) {            /// calculates batch performance assuming all deviations have been previously calculated
+            batch /= batchSize;
+            batchGuess /= batchSize;
+        }
+        void Clear() {
+            averageDeviation = 0;
+            averageGuess = 0;
+            batch = 0;
+            batchGuess = 0;
+        }
+
+        Performance() {
+            Clear();
+        }
+};
+
 class Network {
     private:
         int batchSize;
         int batchIterations;
         vector<float> desiredOutput; /// the output that we truly desire ;)
         vector<float> cost;          /// the activation cost (imagine it is squared but actually it's not, because we just need its derivative which is linear)
+        Performance performance;
         Neurons neurons;
         Weights weights;
         Biases biases;
@@ -374,7 +427,7 @@ class Network {
                 }
             }
         }
-        void Clear() {                          /// clear everything but momentum
+        void Clear() {                          /// clear everything but momentum and batch performance
             /// clear neurons
             ClearNeurons();
             /// clear cost values
@@ -402,6 +455,7 @@ class Network {
         }
         void ClearAll() {                       /// clear everything
             Clear();
+            performance.Clear();
             for(int j = 0; j < width[0]; j++) {
                 biases.previous[0][j] = 0;
                 for(int k = 0; k < inputWidth; k++) {
@@ -465,7 +519,7 @@ class Network {
         }
         void BackPropagate() {                  /// update weights and biases based on their gradients, gradient momentum and learningRate
 
-            /// to each gradient we add 'previous' term to add momentum of the gradient from the previous example
+            /// to each gradient we add 'previous' term to add momentum of the gradient from the previous batch
             for(int j = 0; j < width[0]; j++) { /// update weights and biases from the first non-input layer
                 float biasDelta = biases.gradient[0][j] + biases.previous[0][j];
                 biases.main[0][j] += biasDelta * biasLearningRate;
@@ -503,6 +557,31 @@ class Network {
             BackPropagate();
             CalculateMomentum();
         }
+        void DebugCost(int iteration = 0, bool isDetailed = false) {
+            cout<<"-------------- ITERATION "<<iteration<<" --------------"<<endl;
+            cout<<"------------------------------------------"<<endl;
+            ClearAll();
+            for(int i = 0; i < batchSize; i++) {
+                desiredOutput = data.desiredOutput[i];
+                neurons.input = data.input[i];
+                Activate();
+                CalculateCost();
+                performance.CalculateDeviation(cost);
+
+                if(isDetailed) {
+                    cout<<"On the "<<i<<" training example: "<<endl;
+                    for(int j = 0; j < width[layers - 1]; j++) {
+                        cout<<"["<<j<<"]"<<" cost: "<<cost[j]<<setw(10)<<desiredOutput[j]<<" - "<<neurons.main[layers - 1][j].output<<endl;
+                    }
+                }
+                Clear();
+            }
+            performance.CalculateBatch(batchSize);
+            cout<<"Batch performance:   "<<performance.batch<<endl;
+            cout<<"Batch guess:         "<<performance.batchGuess * 100<<"%"<<endl;
+            cout<<endl;
+            ClearAll();
+        }
 
     public:
         void Randomize() {  /// randomize all the weights and biases and plug them into the files
@@ -520,37 +599,26 @@ class Network {
                 Clear();
             }
         }
-
-        void ShowResults() {
+        void ShowResults(int iteration = 0, bool isDetailed = false) {
             TrainOnBatch();
-            DebugCost();
+            DebugCost(iteration, isDetailed);
             ClearAll();
-        }
-        void DebugCost(int iteration = 0) {
-            cout<<"-------------- ITERATION "<<iteration<<" --------------"<<endl;
-            cout<<"------------------------------------------"<<endl;
-            ClearAll();
-            for(int i = 0; i < batchSize; i++) {
-                desiredOutput = data.desiredOutput[i];
-                neurons.input = data.input[i];
-                Activate();
-                CalculateCost();
-                cout<<"On the "<<i<<" training example: "<<endl;
-                for(int j = 0; j < width[layers - 1]; j++) {
-                    cout<<"["<<j<<"]"<<" cost: "<<cost[j]<<setw(10)<<desiredOutput[j]<<" - "<<neurons.main[layers - 1][j].output<<endl;
-                }
-                ClearAll();
-            }
         }
 
         Network(int outputActivationFunction = 1, int activationFunction = 1, string directory = "", int _batchIterations = 50, int _batchSize = 0) {
+            /// batch values
             batchSize = _batchSize;
             batchIterations = _batchIterations;
+            /// batch data
             BatchData d(batchSize, inputWidth, width[layers - 1], directory);
             data = d;
+            /// neurons
             Neurons a(activationFunction, outputActivationFunction);
             cost.resize(width[layers - 1]);
             neurons = a;
+            /// performance
+            performance.Clear();
+            /// weights and biases
             biases.Fill();
             weights.Fill();
         }
@@ -561,10 +629,10 @@ int main()
 {
     srand(time(NULL));
 
-    Network n(1, 1, "./trainingData.txt", 10000, 4);
+    Network n(1, 1, "./trainingData.txt", 10000, 6);
     n.Randomize();
     n.RepeatTraining();
-    n.ShowResults();
+    n.ShowResults(0, true);
     n.UpdateFile();
     return 0;
 }
