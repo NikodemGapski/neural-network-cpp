@@ -6,6 +6,11 @@
 #include <vector>
 #include <iomanip>
 
+/// TODO
+/// why the network converges after many times exercising and not less?! (sigmoid - 1000, tanh - 100, relu - dying relu problem, ELU - 100, swish - 300)
+/// for batch size 6
+
+
 /// Things to remember:
 /// * normalize training data, so that the activation function can easily distinct different inputs (the network works best with 0-1 or +/- for classification)
 
@@ -17,6 +22,10 @@
 
 /// * basically trust the algorithm, small network can do way more than you think (really),
 ///     the core issue in deep learning is not a network's size, but amount of data it needs to perform a task
+
+/// * tanh has 5 times stronger gradients than sigmoid
+
+/// * very clean documentation about Machine Learning can be found on: https://ml-cheatsheet.readthedocs.io/en/latest/loss_functions.html
 
 using namespace std;
 
@@ -30,42 +39,90 @@ const float learningRate = 0.2;     /// of the weights
 const float biasLearningRate = 0.2; /// because the biases sometimes may seem to be escalating too much at first (depending on data), just for the flexibility
 const float momentum = 0.8;         /// momentum of the gradient (how much previous gradient influences the current one)
 
+enum Activation {
+    Sigmoid,
+    Tanh,
+    ReLU,
+    ELU,
+    Swish
+};
+
 class Neuron {
     private:
-        ///activation functions and their derivative calculations
-        double Sigmoid() {              /// sigmoid(x) = 1 / (1 + e^(-x))
+        ///activation functions and their derivative calculations (assuming the outputs are already calculated in their type)
+        double _Sigmoid() {              /// sigmoid(x) = 1 / (1 + e^(-x))
             return 1 / (1 + exp(-input));
         }
-        double SigmoidDerivative() {
-            return output * (1 - output); /// assuming the output is already sigmoid
+        double _SigmoidDerivative() {
+            return output * (1 - output);
         }
-        double Swish() {                /// swish(x) = x * sigmoid(x)
-            return input * Sigmoid();
+
+        double _Tanh() {                /// tanh(x) = (e^(x) - e^(-x))/(e^(x) + e^(-x))
+            return (exp(input) - exp(-input))/(exp(input) + exp(-input));
         }
-        double SwishDerivative() {
-            return Sigmoid() * (input * (1 - Sigmoid()) + 1); /// assuming the output is already swish
+        double _TanhDerivative() {
+            return 1 - _Tanh() * _Tanh();
+        }
+
+        double _ReLU() {                /// ReLU(x) = max(0, x)
+            return max(0.0, input);
+        }
+        double _ReLUDerivative() {
+            if(input > 0)
+                return 1;
+            return 0;
+        }
+
+        double _ELU() {
+            if(input >= 0)
+                return input;
+            return exp(input) - 1;
+        }
+        double _ELUDerivative() {
+            if(input >= 0)
+                return 1;
+            return exp(input);
+        }
+
+        double _Swish() {                /// swish(x) = x * sigmoid(x)
+            return input * _Sigmoid();
+        }
+        double _SwishDerivative() {
+            return _Sigmoid() * (input * (1 - _Sigmoid()) + 1);
         }
 
     public:
-        double input;                /// the sum of all the neurons multiplied by the biases from the previous layer
-        double output;               /// the input converted by an activation function
-        double costDerivative;       /// the value of the derivative of the cost function with respect to this particular neuron
+        double input;                   /// the sum of all the neurons multiplied by the biases from the previous layer
+        double output;                  /// the input converted by an activation function
+        double costDerivative;          /// the value of the derivative of the cost function with respect to this particular neuron
                                                                                             ///(how much it influences the error)
-        double activationDerivative; /// the value of the activation function's derivative
-        int activationFunction;      /// type of an activation function (1 - sigmoid, 2 - swish)
+        double activationDerivative;    /// the value of the activation function's derivative
+        Activation activationFunction;  /// type of an activation function
 
         void Activate() {
-            if(activationFunction == 1) {
-                output = Sigmoid();
-            }else if(activationFunction == 2) {
-                output = Swish();
+            if(activationFunction == Sigmoid) {
+                output = _Sigmoid();
+            }else if(activationFunction == Tanh) {
+                output = _Tanh();
+            }else if(activationFunction == ReLU) {
+                output = _ReLU();
+            }else if(activationFunction == ELU) {
+                output = _ELU();
+            }else if(activationFunction == Swish) {
+                output = _Swish();
             }
         }
         void CalculateActivationDerivative() {
-            if(activationFunction == 1) {
-                activationDerivative = SigmoidDerivative();
-            }else if(activationFunction == 2) {
-                activationDerivative = SwishDerivative();
+            if(activationFunction == Sigmoid) {
+                activationDerivative = _SigmoidDerivative();
+            }else if(activationFunction == Tanh) {
+                activationDerivative = _TanhDerivative();
+            }else if(activationFunction == ReLU) {
+                activationDerivative = _ReLUDerivative();
+            }else if(activationFunction == ELU) {
+                activationDerivative = _ELUDerivative();
+            }else if(activationFunction == Swish) {
+                activationDerivative = _SwishDerivative();
             }
         }
         void Clear() {
@@ -75,7 +132,7 @@ class Neuron {
             activationDerivative = 0;
         }
 
-        Neuron(int activation = 1) { /// type of an activation function (1 - sigmoid, 2 - swish), sigmoid is default
+        Neuron(Activation activation = Sigmoid) { /// type of an activation function, sigmoid is default
             activationFunction = activation;
             Clear();
         }
@@ -86,7 +143,7 @@ class Neurons {
         vector<float> input;            /// the input ones do not need to be the neurons, just values
         vector<vector<Neuron> > main;   /// all of the hidden neurons + output neurons
 
-        Neurons(int activationFunction = 1, int outputActivationFunction = 1) { /// constructor (just creates empty arrays with activation function)
+        Neurons(Activation activationFunction = Sigmoid, Activation outputActivationFunction = Sigmoid) { /// constructor (just creates empty arrays with activation function)
             /// input
             vector<float> a(inputWidth);
             input = a;
@@ -605,7 +662,7 @@ class Network {
             ClearAll();
         }
 
-        Network(int outputActivationFunction = 1, int activationFunction = 1, string directory = "", int _batchIterations = 50, int _batchSize = 0) {
+        Network(Activation outputActivationFunction = Sigmoid, Activation activationFunction = Sigmoid, string directory = "", int _batchIterations = 50, int _batchSize = 0) {
             /// batch values
             batchSize = _batchSize;
             batchIterations = _batchIterations;
@@ -629,7 +686,7 @@ int main()
 {
     srand(time(NULL));
 
-    Network n(1, 1, "./trainingData.txt", 10000, 6);
+    Network n(Sigmoid, ELU, "./trainingData.txt", 100, 6);
     n.Randomize();
     n.RepeatTraining();
     n.ShowResults(0, true);
