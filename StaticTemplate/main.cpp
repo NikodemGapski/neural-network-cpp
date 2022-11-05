@@ -6,11 +6,6 @@
 #include <vector>
 #include <iomanip>
 
-/// TODO
-/// why the network converges after many times exercising and not less?! (sigmoid - 1000, tanh - 100, relu - dying relu problem, ELU - 100, swish - 300)
-/// for batch size 6
-
-
 /// Things to remember:
 /// * normalize training data, so that the activation function can easily distinct different inputs (the network works best with 0-1 or +/- for classification)
 

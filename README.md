@@ -13,3 +13,11 @@ Its neurons are grouped in layers. Size of each layer, as well as activation fun
 Network is trained on examples in trainingData.txt file by backpropagation with added momentum.
 
 Weights and biases are stored and can be accessed from files weights.txt and biases.txt accordingly.
+
+## Disclaimer
+
+This implementation was created for educational purposes only. It is not optimised, so training the network on large data may not be feasible.
+
+## License
+
+This project is under MIT License.
